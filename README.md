@@ -57,3 +57,5 @@ isValid: true
     Description: Attempts to verify the email address by connecting to the domain's SMTP server.
     Parameters: email (string) - The email address to verify, mxRecords ([]*net.MX) - The list of MX records for the domain.
     Returns: bool - Indicates if the email address is valid.
+
+inspo: https://verifalia.com
