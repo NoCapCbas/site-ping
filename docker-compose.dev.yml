@@ -1,0 +1,32 @@
+
+services:
+  savvi_verify:
+    build:
+      context: .
+      dockerfile: dockerfile.dev
+    env_file:
+      - .env.prod
+      - .env.dev # second because it overrides the first
+    ports:
+      - "${AUTH_PORT}:8080"
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+
+  web:
+    build:
+      context: .
+      dockerfile: ./web/dockerfile.dev
+    env_file:
+      - .env.dev 
+    ports:
+      - "${WEB_PORT}:3000"
+    environment:
+      - CHOKIDAR_USEPOLLING=true # Enable polling to support hot reloading
+    volumes:
+      - ./web:/web:delegated
+      - /web/node_modules
+    depends_on:
+      - auth_app
+      - db

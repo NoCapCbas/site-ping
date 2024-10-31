@@ -1,0 +1,29 @@
+# Use the official Golang image as the base image
+FROM golang:1.22-alpine AS builder
+
+# Set the working directory
+WORKDIR /app
+
+# Copy go mod file
+COPY go.mod go.sum ./
+
+# Download all dependencies
+RUN go mod download
+
+# Copy the source code
+COPY . .
+
+# Build the application
+RUN go build -o main ./cmd
+
+# Use a minimal alpine image for the final stage
+FROM alpine:3.14
+
+# Set the working directory
+WORKDIR /root/
+
+# Copy the binary from the builder stage
+COPY --from=builder /app/main .
+
+# Run the binary
+CMD ["./main"]
