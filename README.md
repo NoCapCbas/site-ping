@@ -23,13 +23,13 @@ This Go program is designed to validate and verify email addresses. It checks th
 1. Open a terminal and navigate to the directory containing the source code.
 2. Run the program using the following command:
 ```bash
-go run main.go
+go run cli.go
 ```
 3. When prompted, enter the email address you wish to verify.
 
 ## Example
 ```sh
-$ go run main.go
+$ go run cli.go
 Please enter a valid email> test@example.com
 domain: example.com, hasMX: true, hasSPF: true, spfRecord: v=spf1 include:_spf.example.com ~all, hasDMARC: true, dmarcRecord: v=DMARC1; p=none; rua=mailto:dmarc-reports@example.com
 isValid: true
