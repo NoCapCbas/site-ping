@@ -1,4 +1,4 @@
-name: SavviVerify
+name: site-ping
 on:
  push:
    branches:
@@ -48,4 +48,4 @@ jobs:
           context: .
           file: dockerfile.prod
           push: true
-          tags: ghcr.io/nocapcbas/savvi-verify:prod
+          tags: ghcr.io/nocapcbas/site-ping:prod

@@ -1,13 +1,13 @@
 
 services:
 
-  savvi_verify:
-    image: ghcr.io/nocapcbas/savvi-verify:prod
+  site_ping:
+    image: ghcr.io/nocapcbas/site-ping:prod
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.savvi-verify.rule=Host(`${HOST_DOMAIN}`)"
-      - "traefik.http.routers.savvi-verify.entrypoints=websecure"
-      - "traefik.http.routers.savvi-verify.tls.certresolver=myresolver"
+      - "traefik.http.routers.site-ping.rule=Host(`${HOST_DOMAIN}`)"
+      - "traefik.http.routers.site-ping.entrypoints=websecure"
+      - "traefik.http.routers.site-ping.tls.certresolver=myresolver"
       - "com.centurylinklabs.watchtower.enable=true"
     restart: always
 

@@ -48,20 +48,18 @@ func handleIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 func handlePingCount(w http.ResponseWriter, r *http.Request) {
-	log.Println("Ping count requested")
+	log.Printf("Ping count requested %d", SitesPingedCount.Load())
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]int{"pingCount": int(SitesPingedCount.Load())})
 }
 
 func handlePingSite(w http.ResponseWriter, r *http.Request) {
-	SitesPingedCount.Add(1)
-	log.Printf("Ping site requested. Total sites pinged: %d", SitesPingedCount.Load())
 	// Check global rate limit
 	if !limiter.isAllowed() {
 		log.Printf("Rate limit exceeded for ALL")
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"error": "Rate limit exceeded. Please wait 10 seconds between pinging websites. This is to prevent abuse and not overload my server. This is applied to all users. ;) thanks!",
+			"error": "Rate limit exceeded. Please wait 10 seconds between pinging websites. This is to prevent abuse and not overload my server. This rate limit is applied to all users. ;) Thanks for your patience!",
 		})
 		return
 	}
@@ -103,6 +101,8 @@ func handlePingSite(w http.ResponseWriter, r *http.Request) {
 		HTML:       string(body),
 		StatusCode: resp.StatusCode,
 	}
+	SitesPingedCount.Add(1)
+	log.Printf("Ping site requested. Total successful sites pinged: %d", SitesPingedCount.Load())
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
