@@ -61,6 +61,7 @@
                           }
                       } else {
                           this.response = data;
+                          this.updatePingCount();
                       }
                   } else {
                       this.errorMessage = data.message || 'Failed to fetch website';

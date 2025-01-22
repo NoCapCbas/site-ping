@@ -1,6 +1,7 @@
 package main
 
 import (
+	"embed"
 	"encoding/json"
 	"io"
 	"log"
@@ -12,6 +13,9 @@ import (
 )
 
 var SitesPingedCount atomic.Int32
+
+//go:embed web/index.html
+var content embed.FS
 
 // RateLimiter manages global rate limiting
 type RateLimiter struct {
@@ -44,7 +48,15 @@ func main() {
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
 	log.Println("Index page requested")
-	http.ServeFile(w, r, "web/index.html")
+	data, err := content.ReadFile("web/index.html")
+	if err != nil {
+		log.Printf("Error reading index.html: %v", err)
+		http.Error(w, "Error reading index.html", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html")
+	w.WriteHeader(http.StatusOK)
+	w.Write(data)
 }
 
 func handlePingCount(w http.ResponseWriter, r *http.Request) {
