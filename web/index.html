@@ -3,63 +3,152 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Email Verification</title>
+    <title>Website Ping</title>
     <script src="https://unpkg.com/alpinejs" defer></script>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="min-h-screen transition-colors duration-300 bg-gray-100" 
+<body class="min-h-screen bg-gray-100" 
       x-data="{ 
-          email: '', 
-          isVerified: null,
+          url: '', 
+          response: null,
+          loading: false,
           errorMessage: '',
-          async checkEmail() {
+          viewCount: 0,
+          rateLimitCountdown: 0,
+          suggestions: [
+              'google.com',
+              'github.com',
+              'example.com',
+              'wikipedia.org',
+              'linkedin.com',
+              'facebook.com',
+              'instagram.com',
+              'reddit.com'
+          ],
+          async updateViewCount() {
+              const response = await fetch('/view-count');
+              const data = await response.json();
+              this.viewCount = data.count;
+          },
+          setUrl(suggestion) {
+              this.url = suggestion;
+              this.pingWebsite();
+          },
+          startRateLimitCountdown() {
+              this.rateLimitCountdown = 10;
+              const timer = setInterval(() => {
+                  this.rateLimitCountdown--;
+                  if (this.rateLimitCountdown <= 0) {
+                      clearInterval(timer);
+                  }
+              }, 1000);
+          },
+          async pingWebsite() {
+              this.loading = true;
+              this.response = null;
+              this.errorMessage = '';
+              
               try {
-                  const response = await fetch('/verify-email?email=' + this.email, {
-                      method: 'GET',
-                      headers: {
-                          'Content-Type': 'application/json',
-                      },
-                  });
+                  const response = await fetch('/ping-site?url=' + encodeURIComponent(this.url));
                   const data = await response.json();
-                  this.isVerified = response.ok;
-                  this.errorMessage = response.ok ? '' : data.message;
+                  
+                  if (response.ok) {
+                      if (data.error) {
+                          this.errorMessage = data.error;
+                          if (data.error.includes('Rate limit exceeded')) {
+                              this.startRateLimitCountdown();
+                          }
+                      } else {
+                          this.response = data;
+                      }
+                  } else {
+                      this.errorMessage = data.message || 'Failed to fetch website';
+                  }
               } catch (error) {
-                  this.isVerified = false;
+                  console.error('Network error occurred', error);
                   this.errorMessage = 'Network error occurred';
+              } finally {
+                  this.loading = false;
               }
           }
-      }"
-      :class="isVerified === null ? 'bg-white' : (isVerified ? 'bg-green-100' : 'bg-red-100')">
+      }">
 
-    <div class="flex min-h-screen items-center justify-center p-4 bg-gray-100">
-        <div class="w-full max-w-md bg-white rounded-lg shadow-md p-6">
-            <h2 class="text-2xl font-bold mb-4 text-center">Email Verification</h2>
-            <form @submit.prevent="checkEmail" class="space-y-4">
+    <div 
+        class="fixed bottom-4 right-4 bg-black text-white px-4 py-2 rounded-full shadow-lg text-sm font-medium"
+        x-init="updateViewCount()"
+    >
+        👥 Views: <span x-text="viewCount"></span>
+    </div>
+
+    <div class="container mx-auto p-4">
+        <div class="max-w-2xl mx-auto bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 class="text-2xl font-bold mb-4 text-center">Website Ping</h2>
+            
+            <p class="text-sm text-gray-500">
+                <span class="font-bold">Try these:</span>
+            </p>
+            <!-- Suggestion badges -->
+            <div class="flex flex-wrap gap-2 mb-4">
+                <template x-for="suggestion in suggestions" :key="suggestion">
+                    <button 
+                        @click="setUrl(suggestion)"
+                        class="px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-full text-sm text-gray-700 transition-colors"
+                        x-text="suggestion"
+                    ></button>
+                </template>
+            </div>
+
+            <form @submit.prevent="pingWebsite" class="space-y-4">
                 <div>
-                    <label for="email" class="block text-sm font-medium text-gray-700">Email</label>
+                    <label for="url" class="block text-sm font-medium text-gray-700">Website URL</label>
                     <input 
-                        type="email" 
-                        id="email" 
-                        x-model="email"
+                        type="text" 
+                        id="url" 
+                        x-model="url"
+                        placeholder="Enter a URL or click a suggestion above"
                         class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500"
                         required
                     >
                 </div>
+                <div x-show="rateLimitCountdown > 0" class="text-center text-sm text-gray-600 mt-2">
+                    Please wait <span x-text="rateLimitCountdown"></span> seconds before next request
+                </div>
                 <button 
                     type="submit"
                     class="w-full bg-black text-white py-2 px-4 rounded-md hover:bg-gray-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                    :disabled="loading || rateLimitCountdown > 0"
                 >
-                    Verify Email
+                    <span x-show="!loading">Ping Website</span>
+                    <span x-show="loading">Loading...</span>
                 </button>
             </form>
             
-            <div x-show="isVerified !== null" class="mt-4 text-center">
-                <p x-text="isVerified ? 'Email verified successfully!' : 'Email verification failed!'"
-                   :class="isVerified ? 'text-green-600' : 'text-red-600'"
-                   class="font-medium"></p>
-                <p x-show="!isVerified && errorMessage" 
-                   x-text="errorMessage"
-                   class="mt-2 text-sm text-red-500"></p>
+            <div x-show="errorMessage" class="mt-4 p-4 bg-red-100 text-red-700 rounded-md">
+                <p x-text="errorMessage"></p>
+            </div>
+
+            <div x-show="response" class="mt-6">
+                <div class="mb-4">
+                    <h3 class="text-lg font-semibold">Status Code: <span x-text="response?.statusCode" class="font-normal"></span></h3>
+                </div>
+                <div class="border rounded-md p-4 bg-gray-50">
+                    <h3 class="text-lg font-semibold mb-2">Website Preview:</h3>
+                    <div class="overflow-hidden w-full" style="height: 600px;">
+                        <iframe 
+                            x-ref="preview"
+                            class="w-full h-full border-0"
+                            x-init="$watch('response', value => {
+                                if (value?.html) {
+                                    const iframe = $refs.preview;
+                                    const doc = iframe.contentWindow.document;
+                                    doc.open();
+                                    doc.write(value.html);
+                                    doc.close();
+                                }
+                            })"
+                        ></iframe>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

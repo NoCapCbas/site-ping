@@ -2,182 +2,108 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
+	"io"
 	"log"
-	"net"
 	"net/http"
-	"net/smtp"
-	"net/textproto"
-	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// EmailResponse represents the JSON response structure.
-type EmailResponse struct {
-	Email       string `json:"email"`
-	IsValid     bool   `json:"is_valid"`
-	HasMX       bool   `json:"has_mx"`
-	HasSPF      bool   `json:"has_spf"`
-	SPFRecord   string `json:"spf_record"`
-	HasDMARC    bool   `json:"has_dmarc"`
-	DMARCRecord string `json:"dmarc_record"`
-	Error       string `json:"error,omitempty"`
+var SitesPingedCount atomic.Int32
+
+// RateLimiter manages global rate limiting
+type RateLimiter struct {
+	mu       sync.Mutex
+	lastPing time.Time
+}
+
+var limiter = &RateLimiter{}
+
+func (rl *RateLimiter) isAllowed() bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	if now.Sub(rl.lastPing) < 10*time.Second {
+		return false
+	}
+
+	rl.lastPing = now
+	return true
 }
 
 func main() {
-	http.HandleFunc("/verify-email", handleEmailVerification)
+	http.HandleFunc("/ping-site", handlePingSite)
 	http.HandleFunc("/", handleIndex)
+	http.HandleFunc("/ping-count", handlePingCount)
 	log.Println("Server started on :8080")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func handleIndex(w http.ResponseWriter, r *http.Request) {
+	log.Println("Index page requested")
 	http.ServeFile(w, r, "web/index.html")
 }
 
-// handleEmailVerification handles HTTP requests to verify an email address.
-func handleEmailVerification(w http.ResponseWriter, r *http.Request) {
-	email := r.URL.Query().Get("email")
-	if email == "" {
-		log.Printf("Email parameter is missing")
-		http.Error(w, "Email parameter is missing", http.StatusBadRequest)
+func handlePingCount(w http.ResponseWriter, r *http.Request) {
+	log.Println("Ping count requested")
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"pingCount": int(SitesPingedCount.Load())})
+}
+
+func handlePingSite(w http.ResponseWriter, r *http.Request) {
+	SitesPingedCount.Add(1)
+	log.Printf("Ping site requested. Total sites pinged: %d", SitesPingedCount.Load())
+	// Check global rate limit
+	if !limiter.isAllowed() {
+		log.Printf("Rate limit exceeded for ALL")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]string{
+			"error": "Rate limit exceeded. Please wait 10 seconds between pinging websites. This is to prevent abuse and not overload my server. This is applied to all users. ;) thanks!",
+		})
 		return
 	}
 
-	// Validate the email format
-	if !validateEmail(email) {
-		log.Printf("Invalid email format: %s", email)
-		http.Error(w, "Invalid email format", http.StatusBadRequest)
+	url := r.URL.Query().Get("url")
+	if url == "" {
+		log.Printf("URL parameter is missing")
+		http.Error(w, "URL parameter is missing", http.StatusBadRequest)
 		return
 	}
 
-	// Extract domain from email and verify domain records
-	domain := strings.Split(email, "@")[1]
-	hasMX, mxRecords, hasSPF, spfRecord, hasDMARC, dmarcRecord := verifyDomain(domain)
-
-	// Verify the email using SMTP if the domain has MX records
-	isValid := false
-	var errorMsg string
-	if hasMX {
-		log.Printf("Verifying email: %s", email)
-		isValid, errorMsg = verifyEmail(email, mxRecords)
-	} else {
-		log.Printf("No MX records found for the domain: %s", domain)
-		errorMsg = "No MX records found for the domain"
+	// Add scheme if not present
+	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
+		url = "https://" + url
 	}
 
-	// Create the response and encode it as JSON
-	response := EmailResponse{
-		Email:       email,
-		IsValid:     isValid,
-		HasMX:       hasMX,
-		HasSPF:      hasSPF,
-		SPFRecord:   spfRecord,
-		HasDMARC:    hasDMARC,
-		DMARCRecord: dmarcRecord,
-		Error:       errorMsg,
+	// Fetch the webpage
+	resp, err := http.Get(url)
+	if err != nil {
+		log.Printf("Error fetching URL: %v", err)
+		http.Error(w, "Error fetching URL", http.StatusBadRequest)
+		return
 	}
-	log.Printf("Response: %+v", response)
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response: %v", err)
+		http.Error(w, "Error reading response", http.StatusInternalServerError)
+		return
+	}
+
+	// Create response structure
+	response := struct {
+		HTML       string `json:"html"`
+		StatusCode int    `json:"statusCode"`
+	}{
+		HTML:       string(body),
+		StatusCode: resp.StatusCode,
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
-}
-
-// verifyDomain checks the MX, SPF, and DMARC records for a domain.
-func verifyDomain(domain string) (bool, []*net.MX, bool, string, bool, string) {
-	var hasMX, hasSPF, hasDMARC bool
-	var spfRecord, dmarcRecord string
-
-	// Check domain MX records
-	mxRecords, err := net.LookupMX(domain)
-	if err == nil && len(mxRecords) > 0 {
-		hasMX = true
-	}
-
-	// Check domain SPF records
-	txtRecords, err := net.LookupTXT(domain)
-	if err == nil {
-		for _, record := range txtRecords {
-			if strings.HasPrefix(record, "v=spf1") {
-				hasSPF = true
-				spfRecord = record
-				break
-			}
-		}
-	}
-
-	// Check domain DMARC records
-	dmarcRecords, err := net.LookupTXT("_dmarc." + domain)
-	if err == nil {
-		for _, record := range dmarcRecords {
-			if strings.HasPrefix(record, "v=DMARC1") {
-				hasDMARC = true
-				dmarcRecord = record
-				break
-			}
-		}
-	}
-
-	return hasMX, mxRecords, hasSPF, spfRecord, hasDMARC, dmarcRecord
-}
-
-// validateEmail uses regex to validate the format of an email address.
-func validateEmail(email string) bool {
-	re := regexp.MustCompile(`^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$`)
-	return re.MatchString(email)
-}
-
-// verifyEmail attempts to verify an email address by connecting to its domain SMTP server.
-func verifyEmail(email string, mxRecords []*net.MX) (bool, string) {
-	domain := strings.Split(email, "@")[1]
-
-	for _, mx := range mxRecords {
-		dialer := net.Dialer{
-			Timeout: 5 * time.Second,
-		}
-
-		serverAddr := fmt.Sprintf("%s:25", mx.Host)
-		conn, err := dialer.Dial("tcp", serverAddr)
-		if err != nil {
-			log.Printf("Connection error for %s: %v", mx.Host, err)
-			continue
-		}
-		defer conn.Close()
-
-		client, err := smtp.NewClient(conn, mx.Host)
-		if err != nil {
-			log.Printf("SMTP client error for %s: %v", mx.Host, err)
-			continue
-		}
-		defer client.Close()
-
-		err = client.Hello(domain)
-		if err != nil {
-			log.Printf("HELO error for %s: %v", mx.Host, err)
-			continue
-		}
-
-		err = client.Mail("test@" + domain)
-		if err != nil {
-			log.Printf("MAIL FROM error for %s: %v", mx.Host, err)
-			continue
-		}
-
-		err = client.Rcpt(email)
-		if err != nil {
-			log.Printf("RCPT TO error type: %T", err)
-			log.Printf("RCPT TO error for %s: %v", mx.Host, err)
-
-			switch e := err.(type) {
-			case *textproto.Error:
-				return false, fmt.Sprintf("SMTP Error Code %d: %s", e.Code, e.Msg)
-			default:
-				return false, fmt.Sprintf("Delivery failed: %v", err)
-			}
-		}
-
-		return true, ""
-	}
-
-	return false, "Could not verify email: all MX servers failed"
 }
